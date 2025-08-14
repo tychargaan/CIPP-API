@@ -20,16 +20,16 @@ function Get-CIPPStandards {
     $Table = Get-CippTable -tablename 'templates'
     $Filter = "PartitionKey eq 'StandardsTemplateV2'"
     $Templates = (Get-CIPPAzDataTableEntity @Table -Filter $Filter | Sort-Object TimeStamp).JSON |
-        ForEach-Object {
-            try {
-                # Fix old "Action" => "action"
-                $JSON = $_ -replace '"Action":', '"action":' -replace '"permissionlevel":', '"permissionLevel":'
-                ConvertFrom-Json -InputObject $JSON -ErrorAction SilentlyContinue
-            } catch {}
-        } |
-        Where-Object {
-            $_.GUID -like $TemplateId -and $_.runManually -eq $runManually
-        }
+    ForEach-Object {
+        try {
+            # Fix old "Action" => "action"
+            $JSON = $_ -replace '"Action":', '"action":' -replace '"permissionlevel":', '"permissionLevel":'
+            ConvertFrom-Json -InputObject $JSON -ErrorAction SilentlyContinue
+        } catch {}
+    } |
+    Where-Object {
+        $_.GUID -like $TemplateId -and $_.runManually -eq $runManually
+    }
 
     # 2. Get tenant list, filter if needed
     $AllTenantsList = Get-Tenants
@@ -60,6 +60,23 @@ function Get-CIPPStandards {
                         $CurrentStandard = $Item.PSObject.Copy()
                         $CurrentStandard | Add-Member -NotePropertyName 'TemplateId' -NotePropertyValue $Template.GUID -Force
 
+                        if ($CurrentStandard.action.value -contains 'Remediate' -and -not ($CurrentStandard.action.value -contains 'Report')) {
+                            Write-Host 'STRDS: autoRemediate set to true, adding Remediate action'
+
+                            $reportAction = [pscustomobject]@{
+                                label = 'Report'
+                                value = 'Report'
+                            }
+                            $CurrentStandard.action = @($CurrentStandard.action) + $reportAction
+                        }
+                        #If its a drift template, with autoRemediate, we add the Remediate action.
+                        if ($CurrentStandard.autoRemediate -eq $true) {
+                            $CurrentStandard.action = @($CurrentStandard.action) + [pscustomobject]@{
+                                label = 'Remediate'
+                                value = 'Remediate'
+                            }
+                        }
+
                         $Actions = $CurrentStandard.action.value
                         if ($Actions -contains 'Remediate' -or $Actions -contains 'warn' -or $Actions -contains 'Report') {
                             if (-not $ComputedStandards.Contains($StandardName)) {
@@ -74,6 +91,22 @@ function Get-CIPPStandards {
                     # single object
                     $CurrentStandard = $Value.PSObject.Copy()
                     $CurrentStandard | Add-Member -NotePropertyName 'TemplateId' -NotePropertyValue $Template.GUID -Force
+
+                    if ($CurrentStandard.action.value -contains 'Remediate' -and -not ($CurrentStandard.action.value -contains 'Report')) {
+                        $reportAction = [pscustomobject]@{
+                            label = 'Report'
+                            value = 'Report'
+                        }
+                        $CurrentStandard.action = @($CurrentStandard.action) + $reportAction
+                    }
+                    #If its a drift template, with autoRemediate, we add the Remediate action.
+                    if ($CurrentStandard.autoRemediate -eq $true) {
+                        Write-Host 'STRDS: autoRemediate set to true, adding Remediate action'
+                        $CurrentStandard.action = @($CurrentStandard.action) + [pscustomobject]@{
+                            label = 'Remediate'
+                            value = 'Remediate'
+                        }
+                    }
 
                     $Actions = $CurrentStandard.action.value
                     if ($Actions -contains 'Remediate' -or $Actions -contains 'warn' -or $Actions -contains 'Report') {
@@ -138,7 +171,15 @@ function Get-CIPPStandards {
 
                 if ($template.excludedTenants) {
                     if ($template.excludedTenants -is [System.Collections.IEnumerable] -and -not ($template.excludedTenants -is [string])) {
-                        $excludedTenantValues = $template.excludedTenants | ForEach-Object { $_.value }
+                        $excludedTenantValues = $template.excludedTenants | ForEach-Object {
+                            $FilterValue = $_.value
+                            if ($_.type -eq 'Group') {
+                                ($TenantGroups | Where-Object {
+                                    $_.Id -eq $FilterValue
+                                }).Members.defaultDomainName
+                            } else {
+                                $FilterValue
+                            } }
                     } else {
                         $excludedTenantValues = @($template.excludedTenants)
                     }
@@ -150,7 +191,7 @@ function Get-CIPPStandards {
                 if ($tenantFilterValues -contains 'AllTenants' -and -not ($excludedTenantValues -contains $TenantName)) {
                     $AllTenantsApplicable = $true
                 }
-                if ($tenantFilterValues -contains $TenantName) {
+                if ($tenantFilterValues -contains $TenantName -and -not ($excludedTenantValues -contains $TenantName)) {
                     $TenantSpecificApplicable = $true
                 }
 
@@ -182,6 +223,14 @@ function Get-CIPPStandards {
                             $CurrentStandard = $Item.PSObject.Copy()
                             $CurrentStandard | Add-Member -NotePropertyName 'TemplateId' -NotePropertyValue $Template.GUID -Force
 
+                            if ($CurrentStandard.action.value -contains 'Remediate' -and -not ($CurrentStandard.action.value -contains 'Report')) {
+                                $reportAction = [pscustomobject]@{
+                                    label = 'Report'
+                                    value = 'Report'
+                                }
+                                $CurrentStandard.action = @($CurrentStandard.action) + $reportAction
+                            }
+
                             $Actions = $CurrentStandard.action.value
                             if ($Actions -contains 'Remediate' -or $Actions -contains 'warn' -or $Actions -contains 'Report') {
                                 if (-not $ComputedStandards.Contains($StandardName)) {
@@ -195,6 +244,22 @@ function Get-CIPPStandards {
                     } else {
                         $CurrentStandard = $Value.PSObject.Copy()
                         $CurrentStandard | Add-Member -NotePropertyName 'TemplateId' -NotePropertyValue $Template.GUID -Force
+
+                        if ($CurrentStandard.action.value -contains 'Remediate' -and -not ($CurrentStandard.action.value -contains 'Report')) {
+                            $reportAction = [pscustomobject]@{
+                                label = 'Report'
+                                value = 'Report'
+                            }
+                            $CurrentStandard.action = @($CurrentStandard.action) + $reportAction
+                        }
+                        #If its a drift template, with autoRemediate, we add the Remediate action.
+                        if ($CurrentStandard.autoRemediate -eq $true) {
+                            Write-Host 'STRDS: autoRemediate set to true, adding Remediate action'
+                            $CurrentStandard.action = @($CurrentStandard.action) + [pscustomobject]@{
+                                label = 'Remediate'
+                                value = 'Remediate'
+                            }
+                        }
 
                         $Actions = $CurrentStandard.action.value
                         if ($Actions -contains 'Remediate' -or $Actions -contains 'warn' -or $Actions -contains 'Report') {
@@ -222,6 +287,22 @@ function Get-CIPPStandards {
                             $CurrentStandard = $Item.PSObject.Copy()
                             $CurrentStandard | Add-Member -NotePropertyName 'TemplateId' -NotePropertyValue $Template.GUID -Force
 
+                            if ($CurrentStandard.action.value -contains 'Remediate' -and -not ($CurrentStandard.action.value -contains 'Report')) {
+                                $reportAction = [pscustomobject]@{
+                                    label = 'Report'
+                                    value = 'Report'
+                                }
+                                $CurrentStandard.action = @($CurrentStandard.action) + $reportAction
+                            }
+                            #If its a drift template, with autoRemediate, we add the Remediate action.
+                            if ($CurrentStandard.autoRemediate -eq $true) {
+                                Write-Host 'STRDS: autoRemediate set to true, adding Remediate action'
+                                $CurrentStandard.action = @($CurrentStandard.action) + [pscustomobject]@{
+                                    label = 'Remediate'
+                                    value = 'Remediate'
+                                }
+                            }
+
                             # Filter actions only 'Remediate','warn','Report'
                             $Actions = $CurrentStandard.action.value | Where-Object { $_ -in 'Remediate', 'warn', 'Report' }
                             if ($Actions -contains 'Remediate' -or $Actions -contains 'warn' -or $Actions -contains 'Report') {
@@ -236,6 +317,22 @@ function Get-CIPPStandards {
                     } else {
                         $CurrentStandard = $Value.PSObject.Copy()
                         $CurrentStandard | Add-Member -NotePropertyName 'TemplateId' -NotePropertyValue $Template.GUID -Force
+
+                        if ($CurrentStandard.action.value -contains 'Remediate' -and -not ($CurrentStandard.action.value -contains 'Report')) {
+                            $reportAction = [pscustomobject]@{
+                                label = 'Report'
+                                value = 'Report'
+                            }
+                            $CurrentStandard.action = @($CurrentStandard.action) + $reportAction
+                        }
+                        #If its a drift template, with autoRemediate, we add the Remediate action.
+                        if ($CurrentStandard.autoRemediate -eq $true) {
+                            Write-Host 'STRDS: autoRemediate set to true, adding Remediate action'
+                            $CurrentStandard.action = @($CurrentStandard.action) + [pscustomobject]@{
+                                label = 'Remediate'
+                                value = 'Remediate'
+                            }
+                        }
 
                         $Actions = $CurrentStandard.action.value | Where-Object { $_ -in 'Remediate', 'warn', 'Report' }
                         if ($Actions -contains 'Remediate' -or $Actions -contains 'warn' -or $Actions -contains 'Report') {

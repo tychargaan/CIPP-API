@@ -28,10 +28,20 @@ function Invoke-CIPPStandardIntuneTemplate {
         UPDATECOMMENTBLOCK
             Run the Tools\Update-StandardsComments.ps1 script to update this comment block
     .LINK
-        https://docs.cipp.app/user-documentation/tenant/standards/list-standards/
+        https://docs.cipp.app/user-documentation/tenant/standards/list-standards
     #>
     param($Tenant, $Settings)
+    $TestResult = Test-CIPPStandardLicense -StandardName 'IntuneTemplate_general' -TenantFilter $Tenant -RequiredCapabilities @('INTUNE_A', 'MDM_Services', 'EMS', 'SCCM', 'MICROSOFTINTUNEPLAN1')
     ##$Rerun -Type Standard -Tenant $Tenant -Settings $Settings 'intuneTemplate'
+
+    if ($TestResult -eq $false) {
+        #writing to each item that the license is not present.
+        $settings.TemplateList | ForEach-Object {
+            Set-CIPPStandardsCompareField -FieldName "standards.IntuneTemplate.$($_.value)" -FieldValue 'This tenant does not have the required license for this standard.' -Tenant $Tenant
+        }
+        Write-Host "We're exiting as the correct license is not present for this standard."
+        return $true
+    } #we're done.
     $Table = Get-CippTable -tablename 'templates'
     $Filter = "PartitionKey eq 'IntuneTemplate'"
     $Request = @{body = $null }
@@ -71,6 +81,10 @@ function Invoke-CIPPStandardIntuneTemplate {
             Write-Host "IntuneTemplate: $($Template.TemplateList.value) - Compared JSON: $($Compare | ConvertTo-Json -Compress)"
         } else {
             Write-Host "IntuneTemplate: $($Template.TemplateList.value) - No existing policy found."
+            $compare = [pscustomobject]@{
+                MatchFailed = $true
+                Difference  = 'This policy does not exist in Intune.'
+            }
         }
         if ($Compare) {
             Write-Host "IntuneTemplate: $($Template.TemplateList.value) - Compare found differences."
@@ -84,6 +98,8 @@ function Invoke-CIPPStandardIntuneTemplate {
                 assignTo         = $Template.AssignTo
                 excludeGroup     = $Template.excludeGroup
                 remediate        = $Template.remediate
+                alert            = $Template.alert
+                report           = $Template.report
                 existingPolicyId = $ExistingPolicy.id
                 templateId       = $Template.TemplateList.value
                 customGroup      = $Template.customGroup
@@ -100,6 +116,8 @@ function Invoke-CIPPStandardIntuneTemplate {
                 assignTo         = $Template.AssignTo
                 excludeGroup     = $Template.excludeGroup
                 remediate        = $Template.remediate
+                alert            = $Template.alert
+                report           = $Template.report
                 existingPolicyId = $ExistingPolicy.id
                 templateId       = $Template.TemplateList.value
                 customGroup      = $Template.customGroup
@@ -107,7 +125,7 @@ function Invoke-CIPPStandardIntuneTemplate {
         }
     }
 
-    If ($true -in $Settings.remediate) {
+    if ($true -in $Settings.remediate) {
         Write-Host 'starting template deploy'
         foreach ($TemplateFile in $CompareList | Where-Object -Property remediate -EQ $true) {
             Write-Host "working on template deploy: $($TemplateFile.displayname)"
@@ -116,14 +134,15 @@ function Invoke-CIPPStandardIntuneTemplate {
                 Set-CIPPIntunePolicy -TemplateType $TemplateFile.body.Type -Description $TemplateFile.description -DisplayName $TemplateFile.displayname -RawJSON $templateFile.rawJSON -AssignTo $TemplateFile.AssignTo -ExcludeGroup $TemplateFile.excludeGroup -tenantFilter $Tenant
             } catch {
                 $ErrorMessage = Get-NormalizedError -Message $_.Exception.Message
-                Write-LogMessage -API 'Standards' -tenant $tenant -message "Failed to create or update Intune Template $PolicyName, Error: $ErrorMessage" -sev 'Error'
+                Write-LogMessage -API 'Standards' -tenant $tenant -message "Failed to create or update Intune Template $($TemplateFile.displayname), Error: $ErrorMessage" -sev 'Error'
             }
         }
 
     }
 
-    if ($Settings.alert) {
-        foreach ($Template in $CompareList) {
+    if ($true -in $Settings.alert) {
+        foreach ($Template in $CompareList | Where-Object -Property alert -EQ $true) {
+            Write-Host "working on template alert: $($Template.displayname)"
             $AlertObj = $Template | Select-Object -Property displayname, description, compare, assignTo, excludeGroup, existingPolicyId
             if ($Template.compare) {
                 Write-StandardsAlert -message "Template $($Template.displayname) does not match the expected configuration." -object $AlertObj -tenant $Tenant -standardName 'IntuneTemplate' -standardId $Settings.templateId
@@ -139,13 +158,14 @@ function Invoke-CIPPStandardIntuneTemplate {
         }
     }
 
-    if ($Settings.report) {
-        foreach ($Template in $CompareList) {
+    if ($true -in $Settings.report) {
+        foreach ($Template in $CompareList | Where-Object { $_.report -eq $true -or $_.remediate -eq $true }) {
+            Write-Host "working on template report: $($Template.displayname)"
             $id = $Template.templateId
             $CompareObj = $Template.compare
             $state = $CompareObj ? $CompareObj : $true
             Set-CIPPStandardsCompareField -FieldName "standards.IntuneTemplate.$id" -FieldValue $state -TenantFilter $Tenant
         }
-        Add-CIPPBPAField -FieldName "policy-$id" -FieldValue $Compare -StoreAs bool -Tenant $tenant
+        #Add-CIPPBPAField -FieldName "policy-$id" -FieldValue $Compare -StoreAs bool -Tenant $tenant
     }
 }
