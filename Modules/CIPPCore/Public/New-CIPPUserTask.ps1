@@ -14,15 +14,15 @@ function New-CIPPUserTask {
         $Results.Add("Username: $($CreationResults.Username)")
         $Results.Add("Password: $($CreationResults.Password)")
     } catch {
-        $Results.Add("Failed to create user. $($_.Exception.Message)" )
-        return @{'Results' = $Results }
+        $Results.Add("$($_.Exception.Message)" )
+        throw @{'Results' = $Results }
     }
 
     try {
         if ($UserObj.licenses.value) {
             if ($UserObj.sherwebLicense.value) {
-                $License = Set-SherwebSubscription -Headers $Headers -TenantFilter $UserObj.tenantFilter -SKU $UserObj.sherwebLicense.value -Add 1
-                $null = $results.Add('Added Sherweb License, scheduling assignment')
+                $null = Set-SherwebSubscription -Headers $Headers -TenantFilter $UserObj.tenantFilter -SKU $UserObj.sherwebLicense.value -Add 1
+                $null = $Results.Add('Added Sherweb License, scheduling assignment')
                 $taskObject = [PSCustomObject]@{
                     TenantFilter  = $UserObj.tenantFilter
                     Name          = "Assign License: $UserPrincipalName"
@@ -30,9 +30,9 @@ function New-CIPPUserTask {
                         value = 'Set-CIPPUserLicense'
                     }
                     Parameters    = [pscustomobject]@{
-                        UserId      = $UserObj.id
+                        UserId      = $CreationResults.Username
                         APIName     = 'Sherweb License Assignment'
-                        AddLicenses = $licenses
+                        AddLicenses = $UserObj.licenses.value
                     }
                     ScheduledTime = 0 #right now, which is in the next 15 minutes and should cover most cases.
                     PostExecution = @{
@@ -83,5 +83,6 @@ function New-CIPPUserTask {
         Username = $CreationResults.Username
         Password = $CreationResults.Password
         CopyFrom = $CopyFrom
+        User     = $CreationResults.User
     }
 }
